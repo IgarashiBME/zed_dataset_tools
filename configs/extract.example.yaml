@@ -1,0 +1,50 @@
+input:
+  root: .
+  pattern: "*/*/recording.svo2"
+
+export:
+  name: 500images_v1
+  existing: error
+
+sampling:
+  method: stratified_random
+  count_per_svo: 500
+  seed: 603
+  start_margin_seconds: 10
+  end_margin_seconds: 10
+  min_gap_seconds: 0
+
+playback:
+  strategy: hybrid
+  seek_threshold_frames: 120
+
+progress:
+  interval_seconds: 5
+
+outputs:
+  left:
+    enabled: true
+    format: jpg
+    quality: 95
+  right:
+    enabled: true
+    format: jpg
+    quality: 95
+  depth:
+    enabled: true
+    format: png16
+    unit: millimeter
+    invalid_value: 0
+    max_depth_meters: 40
+  depth_preview:
+    enabled: true
+    format: png
+    colormap: grayscale
+
+zed:
+  depth_mode: NEURAL_LIGHT
+  confidence_threshold: 50
+  texture_confidence_threshold: 100
+
+image:
+  resolution: native

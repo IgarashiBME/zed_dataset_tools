@@ -1,0 +1,34 @@
+# This workspace contains large source recordings and generated datasets.
+# Ignore every top-level path by default, then allow only project files.
+/*
+
+!/.gitignore
+!/README.md
+!/LICENSE
+!/requirements-extractor.txt
+!/.github/
+!/configs/
+!/docs/
+!/scripts/
+!/tests/
+
+# Python-generated files inside allowed directories
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Python environments and editor settings
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+
+# Temporary files
+*.tmp
+*.log
+.DS_Store

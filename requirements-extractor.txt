@@ -1,0 +1,4 @@
+# pyzed is installed by the ZED SDK and is intentionally not listed here.
+numpy>=1.24,<3
+Pillow>=10,<12
+PyYAML>=6,<7
