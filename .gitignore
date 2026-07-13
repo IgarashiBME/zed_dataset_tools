@@ -3,6 +3,7 @@
 /*
 
 !/.gitignore
+!/AGENTS.md
 !/README.md
 !/LICENSE
 !/requirements-extractor.txt
