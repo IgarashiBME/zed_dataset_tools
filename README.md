@@ -16,6 +16,9 @@ The current implementation samples selected frames from SVO2 recordings and expo
 - Configurable progress reporting
 - Output validation for missing, corrupt, or mismatched files
 - Separate source recordings from sibling `<session>_exports` directories
+- Focus and grid browser review with keep, reject reason, hold, and auto-advance
+- Reproducible per-session assignment to disjoint dataset increments
+- Versioned dataset materialization with TXT or image label support
 
 ## Requirements
 
@@ -100,6 +103,26 @@ python3 scripts/svo_extract.py verify \
   20260611-12Ehime/20260611_104824_exports/500images_v1
 ```
 
+Prepare and review a dataset after extraction:
+
+```bash
+python3 scripts/dataset_prepare.py plan \
+  --config configs/dataset.example.yaml
+
+python3 scripts/dataset_prepare.py review \
+  --config configs/dataset.example.yaml
+```
+
+After every session has at least the configured number of images marked `keep`:
+
+```bash
+python3 scripts/dataset_prepare.py select \
+  --config configs/dataset.example.yaml
+
+python3 scripts/dataset_prepare.py build \
+  --config configs/dataset.example.yaml
+```
+
 ## Tests
 
 The unit tests do not require a GPU or an SVO2 file:
@@ -114,6 +137,7 @@ Real SVO2 extraction requires access to the NVIDIA GPU through the ZED SDK.
 
 - [Extractor usage](docs/svo2_extractor_usage.md)
 - [Extractor design](docs/svo2_extractor_design.md)
+- [Dataset review and preparation](docs/dataset_preparation.md)
 
 ## Repository safety
 

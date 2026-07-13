@@ -1,0 +1,35 @@
+input:
+  root: ../20260611-12Ehime_images
+  manifest_pattern: "*_exports/*/manifest.csv"
+  required_modalities: [left, right, depth, depth_preview]
+
+output:
+  root: ../20260611-12Ehime_datasets
+  review_dir: review
+  version: v1
+
+selection:
+  # 各セッションから重複なしで選ぶ。累積は各セッション10、40、100、200枚。
+  scope: per_session
+  increments: [10, 30, 60, 100]
+  seed: 42
+
+materialize:
+  # 同一ファイルシステムでは容量を節約し、失敗時はcopyへフォールバックする。
+  mode: copy
+  fallback_to_copy: true
+
+labels:
+  format: yolo_segmentation
+  extension: txt
+  # 既存ラベルを取り込む場合のみディレクトリを指定する。
+  source_root: null
+  required: false
+  target_view: left
+  classes:
+    - nakaaze
+
+review:
+  host: 127.0.0.1
+  port: 8765
+  page_size: 24
