@@ -1,18 +1,19 @@
 input:
-  root: ../20260611-12Ehime_images
-  manifest_pattern: "*_exports/*/manifest.csv"
+  roots:
+    - ../20260611-12Ehime_images
+  manifest_pattern: "*_train/*/manifest.csv"
   required_modalities: [left, right, depth, depth_preview]
 
 output:
-  root: ../20260611-12Ehime_datasets
-  review_dir: review
-  version: v1
+  root: ../dataset_field_ridge
+  dataset_name: data0004_20260611-12_ehime
+  review_dir: .review
 
 selection:
   # 各セッションから重複なしで選ぶ。累積は各セッション10、40、100、200枚。
   scope: per_session
   increments: [10, 30, 60, 100]
-  seed: 42
+  seed: 603
 
 materialize:
   # 同一ファイルシステムでは容量を節約し、失敗時はcopyへフォールバックする。
@@ -29,7 +30,14 @@ labels:
   classes:
     - nakaaze
 
+yaml:
+  # 別撮影のvalidation/testを使う場合にパスまたは画像リストを指定する。
+  validation: null
+  test: null
+
 review:
   host: 127.0.0.1
   port: 8765
   page_size: 24
+  # 旧レビュー結果を新しいridge_data作業領域へ初回plan時に引き継ぐ。
+  import_from: null

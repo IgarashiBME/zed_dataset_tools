@@ -18,7 +18,8 @@ The current implementation samples selected frames from SVO2 recordings and expo
 - Separate source recordings from sibling `<session>_exports` directories
 - Focus and grid browser review with keep, reject reason, hold, and auto-advance
 - Reproducible per-session assignment to disjoint dataset increments
-- Versioned dataset materialization with TXT or image label support
+- Site/increment directories with cumulative 10/40/100/200-image YAML files
+- Named dataset materialization with TXT or image label support
 
 ## Requirements
 
@@ -121,6 +122,9 @@ python3 scripts/dataset_prepare.py select \
 
 python3 scripts/dataset_prepare.py build \
   --config configs/dataset.example.yaml
+
+python3 scripts/dataset_prepare.py verify \
+  ../ridge_data/dataset01_20260611_ehime
 ```
 
 ## Tests

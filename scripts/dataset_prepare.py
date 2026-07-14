@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 import sys
 import threading
@@ -26,14 +27,17 @@ BUILDER_VERSION = 1
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "input": {
-        "root": "../20260611-12Ehime_images",
-        "manifest_pattern": "*_exports/*/manifest.csv",
+        "roots": [
+            "../20260611-12Ehime_images",
+            "../20260611-12Ehime_images_outer",
+        ],
+        "manifest_pattern": "*_train/*/manifest.csv",
         "required_modalities": ["left", "right", "depth", "depth_preview"],
     },
     "output": {
-        "root": "../20260611-12Ehime_datasets/nakaaze",
-        "review_dir": "review",
-        "version": "v1",
+        "root": "../ridge_data",
+        "dataset_name": "dataset01_20260611_ehime",
+        "review_dir": ".review",
     },
     "selection": {
         "scope": "per_session",
@@ -52,10 +56,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "target_view": "left",
         "classes": ["nakaaze"],
     },
+    "yaml": {
+        "validation": None,
+        "test": None,
+    },
     "review": {
         "host": "127.0.0.1",
         "port": 8765,
         "page_size": 24,
+        "import_from": "../20260611-12Ehime_datasets/review",
     },
 }
 
@@ -63,6 +72,7 @@ CANDIDATE_FIELDS = [
     "candidate_order",
     "image_id",
     "session_id",
+    "site_id",
     "source_manifest",
     "source_svo",
     "requested_frame_index",
@@ -85,12 +95,17 @@ REVIEW_FIELDS = [
     "reviewed_at",
 ]
 
-SELECTION_FIELDS = ["sample_order", "image_id", "session_id", "increment_group"]
+SELECTION_FIELDS = [
+    "sample_order", "image_id", "session_id", "site_id", "increment_group"
+]
+
+SITE_MAP_FIELDS = ["site_id", "session_id"]
 
 DATASET_FIELDS = [
     "sample_order",
     "image_id",
     "session_id",
+    "site_id",
     "increment_group",
     "source_manifest",
     "source_svo",
@@ -179,14 +194,20 @@ def validate_config(config: dict[str, Any]) -> None:
     unknown = set(modalities) - set(MODALITY_TO_SOURCE)
     if unknown:
         raise DatasetError(f"未対応のrequired_modalitiesです: {sorted(unknown)}")
+    roots = config["input"].get("roots")
+    if not isinstance(roots, list) or not roots:
+        raise DatasetError("input.rootsには1つ以上の入力ディレクトリを指定してください")
     if config["materialize"]["mode"] not in {"hardlink", "copy"}:
         raise DatasetError("materialize.modeはhardlinkまたはcopyにしてください")
     extension = str(config["labels"]["extension"]).lstrip(".")
     if not extension or "/" in extension or "\\" in extension:
         raise DatasetError("labels.extensionが不正です")
-    version = str(config["output"]["version"])
-    if not version or version in {".", ".."} or "/" in version or "\\" in version:
-        raise DatasetError("output.versionには単一のディレクトリ名を指定してください")
+    dataset_name = str(config["output"]["dataset_name"])
+    if (
+        not dataset_name or dataset_name in {".", ".."}
+        or "/" in dataset_name or "\\" in dataset_name
+    ):
+        raise DatasetError("output.dataset_nameには単一のディレクトリ名を指定してください")
     review_name = str(config["output"]["review_dir"])
     if not review_name or review_name in {".", ".."} or "/" in review_name or "\\" in review_name:
         raise DatasetError("output.review_dirには単一のディレクトリ名を指定してください")
@@ -201,8 +222,8 @@ def validate_config(config: dict[str, Any]) -> None:
         raise DatasetError("review.page_sizeは1～100にしてください")
 
 
-def input_root(config: dict[str, Any]) -> Path:
-    return Path(config["input"]["root"]).expanduser().resolve()
+def input_roots(config: dict[str, Any]) -> list[Path]:
+    return [Path(value).expanduser().resolve() for value in config["input"]["roots"]]
 
 
 def output_root(config: dict[str, Any]) -> Path:
@@ -210,11 +231,14 @@ def output_root(config: dict[str, Any]) -> Path:
 
 
 def review_dir(config: dict[str, Any]) -> Path:
-    return output_root(config) / str(config["output"]["review_dir"])
+    return (
+        output_root(config) / str(config["output"]["review_dir"])
+        / str(config["output"]["dataset_name"])
+    )
 
 
 def dataset_dir(config: dict[str, Any]) -> Path:
-    return output_root(config) / str(config["output"]["version"])
+    return output_root(config) / str(config["output"]["dataset_name"])
 
 
 def atomic_write_csv(path: Path, fieldnames: list[str], rows: Iterable[dict[str, str]]) -> None:
@@ -252,6 +276,42 @@ def stable_seed(seed: int, namespace: str) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
+def assign_site_ids(
+    sessions: Iterable[str], existing_rows: Iterable[dict[str, str]] = ()
+) -> list[dict[str, str]]:
+    current_sessions = set(sessions)
+    mapping: dict[str, str] = {}
+    used_numbers: set[int] = set()
+    used_site_ids: set[str] = set()
+    for row in existing_rows:
+        site_id = row["site_id"]
+        session_id = row["session_id"]
+        match = re.fullmatch(r"site(\d+)", site_id)
+        if not match or session_id in mapping or site_id in used_site_ids:
+            raise DatasetError("site_map.csvに不正または重複したsite割当があります")
+        mapping[session_id] = site_id
+        used_site_ids.add(site_id)
+        used_numbers.add(int(match.group(1)))
+    next_number = 1
+    for session in sorted(current_sessions):
+        if session in mapping:
+            continue
+        while next_number in used_numbers:
+            next_number += 1
+        site_id = f"site{next_number:02d}"
+        mapping[session] = site_id
+        used_site_ids.add(site_id)
+        used_numbers.add(next_number)
+    return sorted(
+        (
+            {"site_id": site_id, "session_id": session_id}
+            for session_id, site_id in mapping.items()
+            if session_id in current_sessions
+        ),
+        key=lambda row: int(row["site_id"].removeprefix("site")),
+    )
+
+
 def session_id_for(row: dict[str, str]) -> str:
     image_id = row.get("image_id", "")
     if "_" not in image_id or Path(image_id).name != image_id:
@@ -260,9 +320,14 @@ def session_id_for(row: dict[str, str]) -> str:
 
 
 def discover_manifests(config: dict[str, Any]) -> list[Path]:
-    root = input_root(config)
     pattern = str(config["input"]["manifest_pattern"])
-    return sorted(path.resolve() for path in root.glob(pattern) if path.is_file())
+    paths = {
+        path.resolve()
+        for root in input_roots(config)
+        for path in root.glob(pattern)
+        if path.is_file()
+    }
+    return sorted(paths)
 
 
 def load_extractor_manifest(path: Path) -> list[dict[str, str]]:
@@ -309,7 +374,7 @@ def collect_candidates(config: dict[str, Any]) -> tuple[list[dict[str, str]], di
     manifests = discover_manifests(config)
     if not manifests:
         raise DatasetError(
-            f"抽出manifestが見つかりません: root={input_root(config)}, "
+            f"抽出manifestが見つかりません: roots={input_roots(config)}, "
             f"pattern={config['input']['manifest_pattern']}"
         )
     destination = review_dir(config)
@@ -342,6 +407,7 @@ def collect_candidates(config: dict[str, Any]) -> tuple[list[dict[str, str]], di
                 "candidate_order": "",
                 "image_id": image_id,
                 "session_id": session_id_for(source),
+                "site_id": "",
                 "source_manifest": relative_path(manifest, destination),
                 "source_svo": relative_path(source_svo, destination),
                 "requested_frame_index": source["requested_frame_index"],
@@ -374,17 +440,45 @@ def plan_review(config: dict[str, Any], overwrite: bool = False) -> tuple[int, d
     directory = review_dir(config)
     candidates_path = directory / "candidates.csv"
     reviews_path = directory / "review.csv"
+    site_map_path = directory / "site_map.csv"
     if candidates_path.exists() and not overwrite:
         raise DatasetError(f"既存のレビュー計画があります: {candidates_path}")
     existing_reviews: dict[str, dict[str, str]] = {}
-    if reviews_path.exists():
-        existing_reviews = {row["image_id"]: row for row in read_csv(reviews_path, REVIEW_FIELDS)}
+    import_value = config["review"].get("import_from")
+    import_directory = (
+        Path(import_value).expanduser().resolve() if import_value not in {None, ""} else None
+    )
+    review_source = reviews_path
+    if not review_source.exists() and import_directory is not None:
+        imported_reviews = import_directory / "review.csv"
+        if imported_reviews.exists():
+            review_source = imported_reviews
+    if review_source.exists():
+        existing_reviews = {
+            row["image_id"]: row for row in read_csv(review_source, REVIEW_FIELDS)
+        }
     candidates, stats = collect_candidates(config)
     if not candidates:
         raise DatasetError("使用可能な候補画像がありません")
+    site_map_source = site_map_path
+    if not site_map_source.exists() and import_directory is not None:
+        imported_site_map = import_directory / "site_map.csv"
+        if imported_site_map.exists():
+            site_map_source = imported_site_map
+    existing_site_rows = (
+        read_csv(site_map_source, SITE_MAP_FIELDS) if site_map_source.exists() else []
+    )
+    site_rows = assign_site_ids(
+        (row["session_id"] for row in candidates), existing_site_rows
+    )
+    site_by_session = {row["session_id"]: row["site_id"] for row in site_rows}
+    for candidate in candidates:
+        candidate["site_id"] = site_by_session[candidate["session_id"]]
     reviews = [existing_reviews.get(row["image_id"], empty_review(row["image_id"])) for row in candidates]
+    stats["preserved_reviews"] = sum(bool(row["decision"]) for row in reviews)
     atomic_write_csv(candidates_path, CANDIDATE_FIELDS, candidates)
     atomic_write_csv(reviews_path, REVIEW_FIELDS, reviews)
+    atomic_write_csv(site_map_path, SITE_MAP_FIELDS, site_rows)
     write_yaml(directory / "review_config.yaml", config_snapshot(config, "review-plan"))
     return len(candidates), stats
 
@@ -504,6 +598,7 @@ def create_selection(config: dict[str, Any], overwrite: bool = False) -> list[di
                     "sample_order": str(len(rows) + 1),
                     "image_id": candidate["image_id"],
                     "session_id": session,
+                    "site_id": candidate["site_id"],
                     "increment_group": group,
                 })
         cursor += increment
@@ -558,166 +653,197 @@ def label_source_for(image_id: str, config: dict[str, Any]) -> Path | None:
     return Path(source_root).expanduser().resolve() / f"{image_id}.{extension}"
 
 
+def increment_from_group(group: str) -> int:
+    if not group.startswith("add_"):
+        raise DatasetError(f"増分グループ名が不正です: {group}")
+    try:
+        value = int(group.removeprefix("add_"))
+    except ValueError as exc:
+        raise DatasetError(f"増分グループ名が不正です: {group}") from exc
+    if value < 1:
+        raise DatasetError(f"増分グループ名が不正です: {group}")
+    return value
+
+
+def site_group_dir(site_id: str, group: str) -> str:
+    return f"{site_id}_add{increment_from_group(group):03d}"
+
+
+def ordered_site_ids(rows: Iterable[dict[str, str]]) -> list[str]:
+    return sorted(
+        {row["site_id"] for row in rows},
+        key=lambda value: int(value.removeprefix("site")),
+    )
+
+
+def write_dataset_yamls(
+    directory: Path, rows: list[dict[str, str]], config: dict[str, Any]
+) -> None:
+    sites = ordered_site_ids(rows)
+    increments = [int(value) for value in config["selection"]["increments"]]
+    included: list[int] = []
+    cumulative = 0
+    names = {index: name for index, name in enumerate(config["labels"]["classes"])}
+    for increment in increments:
+        included.append(increment)
+        cumulative += increment
+        train = [
+            f"images/{site_id}_add{value:03d}"
+            for site_id in sites
+            for value in included
+        ]
+        content: dict[str, Any] = {"path": "..", "train": train, "names": names}
+        if config["yaml"].get("validation") is not None:
+            content["val"] = config["yaml"]["validation"]
+        if config["yaml"].get("test") is not None:
+            content["test"] = config["yaml"]["test"]
+        write_yaml(directory / f"dataset_n{cumulative:03d}.yaml", content)
+
+
 def build_dataset(config: dict[str, Any]) -> tuple[Path, int]:
     destination = dataset_dir(config)
     if destination.exists():
         raise DatasetError(
-            f"出力バージョンが既に存在します。別のoutput.versionを指定してください: {destination}"
+            f"出力データセットが既に存在します。output.dataset_nameを変更してください: "
+            f"{destination}"
         )
     candidates, reviews = read_review_workspace(config)
-    selection_path = review_dir(config) / "selection.csv"
+    workspace = review_dir(config)
+    selection_path = workspace / "selection.csv"
+    site_map_path = workspace / "site_map.csv"
     if not selection_path.exists():
         raise DatasetError("先にselectを実行してください")
+    if not site_map_path.exists():
+        raise DatasetError("site_map.csvがありません。planを再実行してください")
     selections = read_csv(selection_path, SELECTION_FIELDS)
+    site_rows = read_csv(site_map_path, SITE_MAP_FIELDS)
     candidate_by_id = {row["image_id"]: row for row in candidates}
     decision_by_id = {row["image_id"]: row["decision"] for row in reviews}
-    session_count = len({row["session_id"] for row in candidates})
+    site_by_session = {row["session_id"]: row["site_id"] for row in site_rows}
+    session_count = len(site_by_session)
     required = sum(int(value) for value in config["selection"]["increments"]) * session_count
     if len(selections) != required:
-        raise DatasetError(f"selection.csvの件数が不正です: expected={required}, actual={len(selections)}")
+        raise DatasetError(
+            f"selection.csvの件数が不正です: expected={required}, actual={len(selections)}"
+        )
     selection_counts: dict[tuple[str, str], int] = defaultdict(int)
     for selected in selections:
         selection_counts[(selected["session_id"], selected["increment_group"])] += 1
-    candidate_sessions = sorted({row["session_id"] for row in candidates})
-    for session in candidate_sessions:
+    for session, site_id in site_by_session.items():
         for increment in config["selection"]["increments"]:
             group = f"add_{int(increment):04d}"
             actual = selection_counts[(session, group)]
             if actual != int(increment):
                 raise DatasetError(
                     f"selection.csvのセッション別件数が不正です: "
-                    f"{session}: {group}: expected={increment}, actual={actual}"
+                    f"{site_id}/{session}: {group}: expected={increment}, actual={actual}"
                 )
     staging = destination.with_name(f".{destination.name}.building")
     if staging.exists():
         raise DatasetError(f"前回の構築途中ディレクトリがあります: {staging}")
-    # Validate all selected inputs before creating output files.
     for selected in selections:
         image_id = selected["image_id"]
         candidate = candidate_by_id.get(image_id)
         if candidate is None or decision_by_id.get(image_id) != "keep":
             raise DatasetError(f"選択画像がkeep状態ではありません: {image_id}")
-        if selected["session_id"] != candidate["session_id"]:
-            raise DatasetError(f"選択画像のセッションIDが一致しません: {image_id}")
+        if (
+            selected["session_id"] != candidate["session_id"]
+            or selected["site_id"] != candidate["site_id"]
+            or site_by_session.get(candidate["session_id"]) != candidate["site_id"]
+        ):
+            raise DatasetError(f"選択画像のsiteまたはセッションが一致しません: {image_id}")
         for source_field in MODALITY_TO_SOURCE.values():
             source_value = candidate[source_field]
-            if source_value and not resolve_recorded_path(source_value, review_dir(config)).is_file():
+            if source_value and not resolve_recorded_path(source_value, workspace).is_file():
                 raise DatasetError(f"選択画像の元ファイルがありません: {image_id}: {source_value}")
         label_source = label_source_for(image_id, config)
         if bool(config["labels"]["required"]) and (
             label_source is None or not label_source.is_file()
         ):
             raise DatasetError(f"必須ラベルがありません: {image_id}")
+
     staging.mkdir(parents=True)
-    for name in ("left", "right", "depth", "depth_preview", "labels", "subsets"):
+    for name in ("images", "right", "depth", "depth_preview", "labels", "yaml", "metadata"):
         (staging / name).mkdir()
+    for selected in selections:
+        group_dir = site_group_dir(selected["site_id"], selected["increment_group"])
+        for name in ("images", "right", "depth", "depth_preview", "labels"):
+            (staging / name / group_dir).mkdir(parents=True, exist_ok=True)
+
+    output_roots = {
+        "left": "images", "right": "right", "depth": "depth",
+        "depth_preview": "depth_preview",
+    }
     manifest_rows: list[dict[str, str]] = []
-    try:
-        for selected in selections:
-            image_id = selected["image_id"]
-            candidate = candidate_by_id.get(image_id)
-            if candidate is None or decision_by_id.get(image_id) != "keep":
-                raise DatasetError(f"選択画像がkeep状態ではありません: {image_id}")
-            output_paths: dict[str, str] = {}
-            for modality, source_field in MODALITY_TO_SOURCE.items():
-                source_value = candidate[source_field]
-                if not source_value:
-                    output_paths[f"{modality}_path"] = ""
-                    continue
-                source = resolve_recorded_path(source_value, review_dir(config))
-                relative = f"{modality}/{image_id}{source.suffix.lower()}"
-                materialize_file(source, staging / relative, config)
-                output_paths[f"{modality}_path"] = relative
-            label_source = label_source_for(image_id, config)
-            label_path = ""
-            label_status = "unlabeled"
-            if label_source is not None and label_source.is_file():
-                extension = str(config["labels"]["extension"]).lstrip(".")
-                label_path = f"labels/{image_id}.{extension}"
-                materialize_file(label_source, staging / label_path, config)
-                label_status = "completed"
-            elif bool(config["labels"]["required"]):
-                raise DatasetError(f"必須ラベルがありません: {image_id}")
-            manifest_rows.append({
-                "sample_order": selected["sample_order"],
-                "image_id": image_id,
-                "session_id": candidate["session_id"],
-                "increment_group": selected["increment_group"],
-                "source_manifest": relative_path(
-                    resolve_recorded_path(candidate["source_manifest"], review_dir(config)),
-                    destination,
-                ),
-                "source_svo": relative_path(
-                    resolve_recorded_path(candidate["source_svo"], review_dir(config)),
-                    destination,
-                ),
-                "requested_frame_index": candidate["requested_frame_index"],
-                "actual_frame_index": candidate["actual_frame_index"],
-                "timestamp_ns": candidate["timestamp_ns"],
-                **output_paths,
-                "label_path": label_path,
-                "label_status": label_status,
-                "width": candidate["width"],
-                "height": candidate["height"],
-                "review_decision": "keep",
-            })
-        atomic_write_csv(staging / "manifest.csv", DATASET_FIELDS, manifest_rows)
-        write_subsets(staging / "subsets", manifest_rows, config)
-        write_yaml(staging / "dataset.yaml", config_snapshot(config, "build"))
-        os.replace(staging, destination)
-    except Exception:
-        # Keep a partial directory for diagnosis; a new version name is required for retry.
-        raise
+    for selected in selections:
+        image_id = selected["image_id"]
+        candidate = candidate_by_id[image_id]
+        group_dir = site_group_dir(candidate["site_id"], selected["increment_group"])
+        output_paths: dict[str, str] = {}
+        for modality, source_field in MODALITY_TO_SOURCE.items():
+            source_value = candidate[source_field]
+            if not source_value:
+                output_paths[f"{modality}_path"] = ""
+                continue
+            source = resolve_recorded_path(source_value, workspace)
+            relative = f"{output_roots[modality]}/{group_dir}/{image_id}{source.suffix.lower()}"
+            materialize_file(source, staging / relative, config)
+            output_paths[f"{modality}_path"] = relative
+        label_source = label_source_for(image_id, config)
+        label_path = ""
+        label_status = "unlabeled"
+        if label_source is not None and label_source.is_file():
+            extension = str(config["labels"]["extension"]).lstrip(".")
+            label_path = f"labels/{group_dir}/{image_id}.{extension}"
+            materialize_file(label_source, staging / label_path, config)
+            label_status = "completed"
+        manifest_rows.append({
+            "sample_order": selected["sample_order"],
+            "image_id": image_id,
+            "session_id": candidate["session_id"],
+            "site_id": candidate["site_id"],
+            "increment_group": selected["increment_group"],
+            "source_manifest": relative_path(
+                resolve_recorded_path(candidate["source_manifest"], workspace), destination
+            ),
+            "source_svo": relative_path(
+                resolve_recorded_path(candidate["source_svo"], workspace), destination
+            ),
+            "requested_frame_index": candidate["requested_frame_index"],
+            "actual_frame_index": candidate["actual_frame_index"],
+            "timestamp_ns": candidate["timestamp_ns"],
+            **output_paths,
+            "label_path": label_path,
+            "label_status": label_status,
+            "width": candidate["width"],
+            "height": candidate["height"],
+            "review_decision": "keep",
+        })
+
+    metadata = staging / "metadata"
+    atomic_write_csv(metadata / "manifest.csv", DATASET_FIELDS, manifest_rows)
+    atomic_write_csv(metadata / "selection.csv", SELECTION_FIELDS, selections)
+    atomic_write_csv(metadata / "site_map.csv", SITE_MAP_FIELDS, site_rows)
+    write_yaml(metadata / "dataset.yaml", config_snapshot(config, "build"))
+    write_dataset_yamls(staging / "yaml", manifest_rows, config)
+    os.replace(staging, destination)
     return destination, len(manifest_rows)
 
 
-def write_id_list(path: Path, image_ids: Iterable[str]) -> None:
-    values = list(image_ids)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("".join(f"{value}\n" for value in values), encoding="utf-8")
-
-
-def write_subsets(directory: Path, rows: list[dict[str, str]], config: dict[str, Any]) -> None:
-    increments = [int(value) for value in config["selection"]["increments"]]
-    sessions = sorted({row["session_id"] for row in rows})
-    cumulative_all: list[str] = []
-    cumulative_by_session: dict[str, list[str]] = {session: [] for session in sessions}
-    cumulative_count = 0
-    for increment in increments:
-        group = f"add_{increment:04d}"
-        values = [row["image_id"] for row in rows if row["increment_group"] == group]
-        if len(values) != increment * len(sessions):
-            raise DatasetError(f"増分グループの件数が不正です: {group}")
-        write_id_list(directory / f"{group}.txt", values)
-        cumulative_all.extend(values)
-        cumulative_count += increment
-        write_id_list(directory / f"dataset_{cumulative_count:04d}.txt", cumulative_all)
-        for session in sessions:
-            session_values = [
-                row["image_id"] for row in rows
-                if row["increment_group"] == group and row["session_id"] == session
-            ]
-            if len(session_values) != increment:
-                raise DatasetError(f"セッション増分の件数が不正です: {session}: {group}")
-            session_directory = directory / "by_session" / session
-            write_id_list(session_directory / f"{group}.txt", session_values)
-            cumulative_by_session[session].extend(session_values)
-            write_id_list(
-                session_directory / f"dataset_{cumulative_count:04d}.txt",
-                cumulative_by_session[session],
-            )
-
-
-def read_id_list(path: Path) -> list[str]:
+def load_yaml(path: Path) -> dict[str, Any]:
     try:
-        return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    except OSError as exc:
-        raise DatasetError(f"subsetを読み込めません: {path}: {exc}") from exc
+        import yaml
+        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, ValueError) as exc:
+        raise DatasetError(f"YAMLを読み込めません: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise DatasetError(f"YAMLのルートがマッピングではありません: {path}")
+    return value
 
 
 def verify_dataset(path: Path) -> tuple[int, list[str]]:
     errors: list[str] = []
-    manifest_path = path / "manifest.csv"
+    manifest_path = path / "metadata" / "manifest.csv"
     if not manifest_path.exists():
         return 0, [f"欠損: {manifest_path}"]
     rows = read_csv(manifest_path, DATASET_FIELDS)
@@ -725,71 +851,86 @@ def verify_dataset(path: Path) -> tuple[int, list[str]]:
     if len(ids) != len(set(ids)):
         errors.append("manifest.csvにimage_idの重複があります")
     for row in rows:
-        for field in ("left_path", "right_path", "depth_path", "depth_preview_path"):
+        expected_dir = site_group_dir(row["site_id"], row["increment_group"])
+        expected_roots = {
+            "left_path": "images", "right_path": "right", "depth_path": "depth",
+            "depth_preview_path": "depth_preview",
+        }
+        for field, root in expected_roots.items():
             value = row[field]
+            if value and not value.startswith(f"{root}/{expected_dir}/"):
+                errors.append(f"{row['image_id']}: 配置先が不正です: {value}")
             if value and not (path / value).is_file():
                 errors.append(f"{row['image_id']}: 欠損: {value}")
         label_path = row["label_path"]
+        if label_path and not label_path.startswith(f"labels/{expected_dir}/"):
+            errors.append(f"{row['image_id']}: ラベル配置先が不正です: {label_path}")
         if row["label_status"] == "completed" and (
             not label_path or not (path / label_path).is_file()
         ):
             errors.append(f"{row['image_id']}: completedラベルがありません")
-    groups: dict[str, list[str]] = defaultdict(list)
-    for row in rows:
-        groups[row["increment_group"]].append(row["image_id"])
-    sessions = sorted({row["session_id"] for row in rows})
-    seen: set[str] = set()
-    cumulative: list[str] = []
-    cumulative_by_session: dict[str, list[str]] = {session: [] for session in sessions}
+
+    sites = ordered_site_ids(rows)
+    groups = sorted(
+        {row["increment_group"] for row in rows}, key=increment_from_group
+    )
+    cumulative_groups: list[str] = []
     cumulative_count = 0
-    for group in sorted(groups, key=lambda value: min(int(row["sample_order"]) for row in rows if row["increment_group"] == value)):
-        add_path = path / "subsets" / f"{group}.txt"
-        if not add_path.is_file():
-            errors.append(f"欠損: subsets/{group}.txt")
-            continue
-        values = read_id_list(add_path)
-        try:
-            expected_count = int(group.removeprefix("add_"))
-        except ValueError:
-            expected_count = -1
-        if not group.startswith("add_") or len(values) != expected_count * len(sessions):
-            errors.append(f"{group}の名称と件数が一致しません")
-        if values != groups[group]:
-            errors.append(f"subsets/{group}.txtがmanifestと一致しません")
-        overlap = seen.intersection(values)
-        if overlap:
-            errors.append(f"{group}に他の増分との重複があります")
-        seen.update(values)
-        cumulative.extend(values)
-        cumulative_count += expected_count
-        cumulative_path = path / "subsets" / f"dataset_{cumulative_count:04d}.txt"
-        if not cumulative_path.is_file() or read_id_list(cumulative_path) != cumulative:
-            errors.append(f"累積subsetが不正です: {cumulative_path.name}")
-        for session in sessions:
-            session_values = [
-                row["image_id"] for row in rows
-                if row["increment_group"] == group and row["session_id"] == session
-            ]
-            session_path = path / "subsets" / "by_session" / session / f"{group}.txt"
-            if len(session_values) != expected_count:
-                errors.append(f"{session}: {group}の件数が不正です")
-            if not session_path.is_file() or read_id_list(session_path) != session_values:
-                errors.append(f"セッション別subsetが不正です: {session}: {group}")
-            cumulative_by_session[session].extend(session_values)
-            session_cumulative_path = (
-                path / "subsets" / "by_session" / session
-                / f"dataset_{cumulative_count:04d}.txt"
+    for group in groups:
+        increment = increment_from_group(group)
+        cumulative_groups.append(group)
+        cumulative_count += increment
+        for site_id in sites:
+            actual = sum(
+                row["site_id"] == site_id and row["increment_group"] == group
+                for row in rows
             )
-            if (
-                not session_cumulative_path.is_file()
-                or read_id_list(session_cumulative_path) != cumulative_by_session[session]
-            ):
+            if actual != increment:
                 errors.append(
-                    f"セッション別累積subsetが不正です: {session}: "
-                    f"{session_cumulative_path.name}"
+                    f"{site_id}: {group}の件数が不正です: expected={increment}, actual={actual}"
                 )
-    if set(ids) != seen:
-        errors.append("subsetとmanifestのimage_id集合が一致しません")
+            group_dir = site_group_dir(site_id, group)
+            for root in ("images", "right", "depth", "depth_preview", "labels"):
+                if not (path / root / group_dir).is_dir():
+                    errors.append(f"ディレクトリ欠損: {root}/{group_dir}")
+        yaml_path = path / "yaml" / f"dataset_n{cumulative_count:03d}.yaml"
+        if not yaml_path.is_file():
+            errors.append(f"YAML欠損: {yaml_path.name}")
+            continue
+        content = load_yaml(yaml_path)
+        expected_train = [
+            f"images/{site_id}_add{increment_from_group(value):03d}"
+            for site_id in sites
+            for value in cumulative_groups
+        ]
+        if content.get("path") != ".." or content.get("train") != expected_train:
+            errors.append(f"YAMLのtrain参照が不正です: {yaml_path.name}")
+
+    selection_path = path / "metadata" / "selection.csv"
+    if not selection_path.is_file():
+        errors.append("metadata欠損: selection.csv")
+    else:
+        selections = read_csv(selection_path, SELECTION_FIELDS)
+        expected_selections = [
+            {field: row[field] for field in SELECTION_FIELDS} for row in rows
+        ]
+        if selections != expected_selections:
+            errors.append("metadata/selection.csvがmanifestと一致しません")
+    site_map_path = path / "metadata" / "site_map.csv"
+    if not site_map_path.is_file():
+        errors.append("metadata欠損: site_map.csv")
+    else:
+        site_rows = read_csv(site_map_path, SITE_MAP_FIELDS)
+        expected_sites = {
+            (row["site_id"], row["session_id"]) for row in rows
+        }
+        actual_sites = {
+            (row["site_id"], row["session_id"]) for row in site_rows
+        }
+        if actual_sites != expected_sites or len(site_rows) != len(actual_sites):
+            errors.append("metadata/site_map.csvがmanifestと一致しません")
+    if not (path / "metadata" / "dataset.yaml").is_file():
+        errors.append("metadata欠損: dataset.yaml")
     return len(rows), errors
 
 
@@ -799,6 +940,9 @@ class ReviewApplication:
         self.candidates, self.reviews = read_review_workspace(config)
         self.candidate_by_id = {row["image_id"]: row for row in self.candidates}
         self.review_by_id = {row["image_id"]: row for row in self.reviews}
+        self.site_by_session = {
+            row["session_id"]: row["site_id"] for row in self.candidates
+        }
         self.lock = threading.Lock()
         self.target_per_session = sum(
             int(value) for value in config["selection"]["increments"]
@@ -823,6 +967,7 @@ class ReviewApplication:
                     "image_id": candidate["image_id"],
                     "candidate_order": int(candidate["candidate_order"]),
                     "session_id": candidate["session_id"],
+                    "site_id": candidate["site_id"],
                     "decision": review["decision"],
                     "reject_reason": review["reject_reason"],
                     "note": review["note"],
@@ -852,6 +997,7 @@ class ReviewApplication:
                 count >= self.target_per_session for count in keep_by_session.values()
             ),
             "keep_by_session": keep_by_session,
+            "site_by_session": self.site_by_session,
             "reject_reasons": sorted(reason for reason in REJECT_REASONS if reason),
         }
 
@@ -996,6 +1142,7 @@ def command_plan(args: argparse.Namespace) -> int:
         f"除外: incomplete={stats['incomplete']}, missing={stats['missing']}, "
         f"duplicate={stats['duplicates']}"
     )
+    print(f"引継ぎ済みレビュー: {stats['preserved_reviews']}")
     print(f"出力: {review_dir(config)}")
     return 0
 
@@ -1006,6 +1153,7 @@ def command_status(args: argparse.Namespace) -> int:
     counts = review_counts(reviews)
     target = sum(int(value) for value in config["selection"]["increments"])
     keep_by_session = session_keep_counts(candidates, reviews)
+    site_by_session = {row["session_id"]: row["site_id"] for row in candidates}
     achieved = sum(count >= target for count in keep_by_session.values())
     print(
         f"候補={len(candidates)}, セッション={len(keep_by_session)}, "
@@ -1016,7 +1164,10 @@ def command_status(args: argparse.Namespace) -> int:
     if shortages:
         print("未達セッション:")
         for session, count in shortages:
-            print(f"  {session}: keep={count}, remaining={target - count}")
+            print(
+                f"  {site_by_session[session]}/{session}: "
+                f"keep={count}, remaining={target - count}"
+            )
     return 0
 
 

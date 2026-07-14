@@ -2,71 +2,124 @@
 
 ## 目的
 
-`dataset_prepare.py`は、`svo_extract.py`が生成した抽出manifestを集約し、画像の人手レビュー、再現可能な選択、サイズ別subsetの作成、完成データセットの構築を行う。
+`dataset_prepare.py`は、`svo_extract.py`が生成した抽出manifestを集約し、画像レビュー、セッションごとの選択、site・増分別のファイル配置、累積データセットYAMLの生成を行う。
 
-元のSVO2、抽出画像、抽出manifestは変更しない。レビュー結果と完成データセットは、設定した専用出力ディレクトリへ保存する。
+元のSVO2、抽出画像、抽出manifestは変更しない。レビュー作業領域と完成データセットは`ridge_data/`の下で分離する。
 
 ## 出力構成
 
-設定例では次の場所へ出力する。
+設定例の完成データセット：
 
 ```text
-../20260611-12Ehime_datasets/nakaaze/
-├── review/
-│   ├── candidates.csv
-│   ├── review.csv
-│   ├── review_config.yaml
-│   ├── thumbnails/
-│   └── selection.csv
-└── v1/
-    ├── left/
+../ridge_data/
+├── .review/
+│   └── dataset01_20260611_ehime/
+│       ├── candidates.csv
+│       ├── review.csv
+│       ├── selection.csv
+│       ├── site_map.csv
+│       ├── review_config.yaml
+│       └── thumbnails/
+│
+└── dataset01_20260611_ehime/
+    ├── images/
+    │   ├── site01_add010/
+    │   ├── site01_add030/
+    │   ├── site01_add060/
+    │   ├── site01_add100/
+    │   ├── site02_add010/
+    │   └── ...
     ├── right/
+    │   └── <imagesと同じsite・増分構成>/
     ├── depth/
+    │   └── <imagesと同じsite・増分構成>/
     ├── depth_preview/
+    │   └── <imagesと同じsite・増分構成>/
     ├── labels/
-    ├── subsets/
-    │   ├── add_0010.txt
-    │   ├── add_0030.txt
-    │   ├── add_0060.txt
-    │   ├── add_0100.txt
-    │   ├── dataset_0010.txt
-    │   ├── dataset_0040.txt
-    │   ├── dataset_0100.txt
-    │   ├── dataset_0200.txt
-    │   └── by_session/
-    │       └── <セッションID>/
-    │           ├── add_0010.txt
-    │           ├── add_0030.txt
-    │           ├── add_0060.txt
-    │           ├── add_0100.txt
-    │           ├── dataset_0010.txt
-    │           ├── dataset_0040.txt
-    │           ├── dataset_0100.txt
-    │           └── dataset_0200.txt
-    ├── manifest.csv
-    └── dataset.yaml
+    │   └── <imagesと同じsite・増分構成>/
+    ├── yaml/
+    │   ├── dataset_n010.yaml
+    │   ├── dataset_n040.yaml
+    │   ├── dataset_n100.yaml
+    │   └── dataset_n200.yaml
+    └── metadata/
+        ├── manifest.csv
+        ├── selection.csv
+        ├── site_map.csv
+        └── dataset.yaml
 ```
 
-枚数はすべてセッションごとの指定である。`add_*.txt`は各セッションから同じ枚数を集めた、互いに重複しない全体増分である。`dataset_*.txt`はその累積リストである。`by_session/`には同じ割り当てをセッション別に保存する。
+`images/`はleft画像である。right、depth、depth preview、labelsは同じディレクトリ名と`image_id`で対応する。
 
-33セッションの場合、`dataset_0200.txt`は各セッション200枚、合計6,600枚を含む。割り当ての正本は`manifest.csv`の`session_id`と`increment_group`列とし、すべてのリストとの一致を`verify`で検査する。
+## siteと増分
 
-## 基本操作
+1つの抽出セッションを1つのsiteとして扱う。初回`plan`時に、セッションIDの昇順で`site01`、`site02`、...を割り当て、`site_map.csv`へ固定する。
 
-以下のコマンドは`zed_dataset_tools`ディレクトリから実行する。
+```csv
+site_id,session_id
+site01,20260611_093705
+site02,20260611_102930
+```
 
-### 1. レビュー計画を作る
+`plan --overwrite`で候補を更新しても既存セッションのsite番号は維持する。新しいセッションには未使用の次番号を割り当てる。
+
+各siteの増分は互いに重複しない。
+
+- `add010`: 新規10枚
+- `add030`: 新規30枚
+- `add060`: 新規60枚
+- `add100`: 新規100枚
+
+累積データセットは画像を複製せず、YAMLの参照先を増やして表現する。
+
+- `dataset_n010.yaml`: 全siteの`add010`
+- `dataset_n040.yaml`: 全siteの`add010 + add030`
+- `dataset_n100.yaml`: 全siteの`add010 + add030 + add060`
+- `dataset_n200.yaml`: 全siteの全増分
+
+33 siteなら`dataset_n200.yaml`が参照する画像は合計6,600枚になる。
+
+## 設定
+
+`configs/dataset.example.yaml`の主な項目：
+
+```yaml
+input:
+  roots:
+    - ../20260611-12Ehime_images
+    - ../20260611-12Ehime_images_outer
+  manifest_pattern: "*_train/*/manifest.csv"
+
+output:
+  root: ../ridge_data
+  dataset_name: dataset01_20260611_ehime
+  review_dir: .review
+
+selection:
+  scope: per_session
+  increments: [10, 30, 60, 100]
+  seed: 42
+
+review:
+  import_from: ../20260611-12Ehime_datasets/review
+```
+
+別データセットを作る場合は`output.dataset_name`を変更する。
+
+## 実行方法
+
+すべて`zed_dataset_tools`ディレクトリから実行する。
+
+### 1. レビュー計画
 
 ```bash
 python3 scripts/dataset_prepare.py plan \
   --config configs/dataset.example.yaml
 ```
 
-正常に抽出済みで、設定したleft、right、depth、depth previewが存在する画像だけを候補にする。同一`image_id`は重複排除する。
+正常に抽出済みで、設定した必須モダリティが存在する画像だけを候補にする。同一`image_id`を重複排除し、seed付きでセッションを交互に並べる。画像はまだコピーしない。
 
-候補はseed付きでセッションごとにシャッフルし、セッションを交互に並べる。これにより候補順を再現可能にし、特定セッションへの集中を抑える。全候補の順序を`candidates.csv`へ保存するが、すべてをレビューする必要はない。
-
-抽出manifestが増えた後に候補一覧を更新する場合：
+抽出manifestを追加した後に更新する場合：
 
 ```bash
 python3 scripts/dataset_prepare.py plan \
@@ -74,64 +127,50 @@ python3 scripts/dataset_prepare.py plan \
   --overwrite
 ```
 
-既存候補と同じ`image_id`のレビュー結果は保持される。選択結果を作成済みの場合は、更新後に`select --overwrite`で作り直す。
+既存`image_id`のレビュー結果とsite割当は保持する。設定例では初回plan時に旧`20260611-12Ehime_datasets/review/review.csv`も読み込み、Keep/Reject/Holdを新しい作業領域へ引き継ぐ。元のCSVは変更しない。
 
-### 2. レビュー画面を起動する
+### 2. レビュー
 
 ```bash
 python3 scripts/dataset_prepare.py review \
   --config configs/dataset.example.yaml
 ```
 
-ブラウザで次を開く。
+ブラウザで`http://127.0.0.1:8765`を開く。
 
-```text
-http://127.0.0.1:8765
-```
+既定のフォーカスモードでは、left画像を左側に1枚だけ大きく表示し、右サイドバーに表示切替、Reject理由、メモ、Keep/Reject/Holdを常時表示する。保存成功後に次の未レビュー画像へ進む。Reject理由の既定値は`other`である。
 
-既定ではフォーカスモードで、未レビュー画像を左側に1枚だけ大きく表示する。右サイドバーにはleft/right/depth preview切替、Reject理由、メモ、Keep/Reject/Holdボタンを常時表示する。判定の保存に成功すると、次の未レビュー画像へ自動的に切り替わる。Reject理由の既定値は`other`である。
+キーボード操作：
 
-フォーカスモードでは次のキーを使用できる。
+- `K`: Keep
+- `R`: Reject
+- `H`: Hold
+- `L`: left
+- `V`: right
+- `D`: depth preview
+- `←` / `→`: 前後へ移動
 
-- `K`: Keepして次へ
-- `R`: Rejectして次へ
-- `H`: Holdして次へ
-- `L`: leftを表示
-- `V`: rightを表示
-- `D`: depth previewを表示
-- `←` / `→`: 前後の候補へ移動
+Sessionフィルターには`site ID — session ID`とKeep数を表示する。最後は未達siteへ絞り込み、各siteのKeepを200枚以上にする。
 
-画面上部のボタンでグリッドモードへ切り替えられる。グリッドモードでは複数画像の比較、過去の判定確認、修正を行える。表示用サムネイルは初回アクセス時に`review/thumbnails/`へ遅延生成し、画像をクリックするとleft、right、depth previewをまとめて拡大表示する。
-
-両モードで各セッションの達成状況を確認でき、Sessionフィルターで特定セッションだけをレビューできる。最後は未達セッションへ絞り込み、各セッションのKeepを200枚以上にする。
-
-判定は次の3種類とする。
-
-- `keep`: 採用候補
-- `reject`: 不採用。除外理由の既定値は`other`
-- `hold`: 保留。採用数には含めない
-
-判定は操作ごとに`review.csv`へ保存する。Reject理由を変更せず判定した場合は`other`として保存する。画像は移動も削除もしない。
-
-進捗だけを確認する場合：
+### 3. 進捗確認
 
 ```bash
 python3 scripts/dataset_prepare.py status \
   --config configs/dataset.example.yaml
 ```
 
-### 3. 採用画像を割り当てる
+200枚未満のsiteについて、site ID、session ID、残り枚数を表示する。
+
+### 4. 増分割当
 
 ```bash
 python3 scripts/dataset_prepare.py select \
   --config configs/dataset.example.yaml
 ```
 
-設定例では、すべてのセッションにそれぞれ200枚以上のkeepが必要になる。各セッション内のkeep画像をseed付きで再度並べ替え、セッションごとに10、30、60、100枚の増分へ割り当てて`selection.csv`へ保存する。
+すべてのsiteでKeepが200枚以上必要である。各site内でKeep画像をseed付きで再度並べ替え、10、30、60、100枚の増分へ割り当てる。
 
-33セッションなら選択結果は合計6,600枚になる。1つでもkeepが200枚に達していないセッションがあれば、`select`は不足セッションを表示して停止する。
-
-レビュー判定を変更した後に選択結果を更新する場合：
+レビュー変更後に再選択する場合：
 
 ```bash
 python3 scripts/dataset_prepare.py select \
@@ -139,29 +178,29 @@ python3 scripts/dataset_prepare.py select \
   --overwrite
 ```
 
-### 4. データセットを構築する
+### 5. データセット構築
 
 ```bash
 python3 scripts/dataset_prepare.py build \
   --config configs/dataset.example.yaml
 ```
 
-同一ファイルシステムでは既定でハードリンクを使用する。ハードリンクを作成できない場合はコピーする。配布用に独立したファイルが必要なら`materialize.mode: copy`を指定する。
+設定例では`../ridge_data/dataset01_20260611_ehime/`を作る。既存データセットは上書きしない。作り直す場合は`output.dataset_name`を変更する。
 
-既存バージョンは上書きしない。内容を変更する場合は`output.version`を`v2`などへ変更する。
+`materialize.mode`は`copy`または`hardlink`を指定できる。配布・アノテーション用に元画像から独立させる場合は`copy`を使用する。
 
-### 5. 完成データセットを検証する
+### 6. 検証
 
 ```bash
 python3 scripts/dataset_prepare.py verify \
-  ../20260611-12Ehime_datasets/nakaaze/v1
+  ../ridge_data/dataset01_20260611_ehime
 ```
 
-manifestの重複、各モダリティ、ラベル状態、増分間の重複、累積subsetとの一致を検査する。
+ファイルの存在、site・増分別の件数、モダリティ間の配置、ラベル状態、4つの累積YAMLの参照先、metadataを検査する。
 
 ## ラベル
 
-ラベル拡張子は固定していない。TXTラベルの例：
+TXTラベルの例：
 
 ```yaml
 labels:
@@ -172,14 +211,18 @@ labels:
   target_view: left
 ```
 
-`source_root/<image_id>.txt`が存在すれば`labels/`へ取り込み、manifestを`completed`とする。空のTXTも「確認済みで対象なし」の有効なラベルとして扱う。ファイルがなければ`unlabeled`とする。`required: true`の場合は、選択画像のラベルが1つでも欠けていれば構築を停止する。
+`source_root/<image_id>.txt`が存在すれば対応する`labels/siteXX_addNNN/`へ取り込む。空のTXTも「確認済みで対象なし」の有効なラベルとして扱う。ラベルがなければディレクトリだけを作り、manifestを`unlabeled`とする。
 
-PNGマスクを利用する場合は`format`と`extension`を変更できる。
+生成YAMLの`train`には`images/siteXX_addNNN`のリストを記録する。validation/testは学習に使っていない別撮影データを指定するため、初期値は未設定である。
 
-## 再現性と安全性
+## combined YAML
 
-- 候補提示順と最終割り当てには設定したseedを使用する。
-- 元画像と抽出manifestは読み取り専用として扱う。
+本プログラムは1回につき`output.dataset_name`で指定した1データセットだけを構築する。複数データセットを参照する`ridge_data/combined_yaml/`は現時点では生成しない。
+
+## 安全性
+
+- 元画像と抽出manifestは変更しない。
 - reject画像は削除しない。
-- 完成データセットはバージョン単位で上書きしない。
-- train/validation/testの分割は本ツールでは行わない。テストには別撮影セッションの未使用データを使用する。
+- 候補順、site内選択、増分割当はseedで再現する。
+- 完成データセットを上書きしない。
+- testデータは本ツールの学習用選択に混ぜない。

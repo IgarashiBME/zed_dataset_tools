@@ -31,21 +31,22 @@ class DatasetPreparationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.input = self.root / "images"
-        self.output = self.root / "datasets" / "nakaaze"
+        self.output = self.root / "ridge_data"
         self.labels = self.root / "source_labels"
         self.labels.mkdir(parents=True)
         self.config = dataset_prepare.deep_merge(dataset_prepare.DEFAULT_CONFIG, {
             "input": {
-                "root": str(self.input),
+                "roots": [str(self.input)],
                 "manifest_pattern": "*_exports/*/manifest.csv",
                 "required_modalities": ["left", "right", "depth", "depth_preview"],
             },
             "output": {
                 "root": str(self.output),
-                "review_dir": "review",
-                "version": "v1",
+                "dataset_name": "dataset01_test",
+                "review_dir": ".review",
             },
             "selection": {"scope": "per_session", "increments": [1, 2], "seed": 17},
+            "review": {"import_from": None},
             "materialize": {"mode": "copy", "fallback_to_copy": True},
             "labels": {
                 "format": "yolo_segmentation",
@@ -108,6 +109,7 @@ class DatasetPreparationTests(unittest.TestCase):
         self.assertEqual(count, 5)
         self.assertEqual(stats["missing"], 1)
         self.assertNotEqual(first[0]["session_id"], first[1]["session_id"])
+        self.assertEqual({row["site_id"] for row in first}, {"site01", "site02"})
         application = dataset_prepare.ReviewApplication(self.config)
         state = application.state(0, 1, "unreviewed")
         self.assertEqual(state["page_size"], 24)
@@ -130,6 +132,21 @@ class DatasetPreparationTests(unittest.TestCase):
         })
         self.assertEqual(saved["counts"]["hold"], 1)
 
+        migrated_config = dataset_prepare.deep_merge(self.config, {
+            "output": {"dataset_name": "dataset02_test"},
+            "review": {"import_from": str(dataset_prepare.review_dir(self.config))},
+        })
+        _, migrated_stats = dataset_prepare.plan_review(migrated_config)
+        _, migrated_reviews = dataset_prepare.read_review_workspace(migrated_config)
+        self.assertEqual(migrated_stats["preserved_reviews"], 1)
+        self.assertEqual(
+            next(
+                row for row in migrated_reviews
+                if row["image_id"] == state["items"][0]["image_id"]
+            )["decision"],
+            "hold",
+        )
+
         dataset_prepare.plan_review(self.config, overwrite=True)
         second = dataset_prepare.read_csv(
             dataset_prepare.review_dir(self.config) / "candidates.csv",
@@ -138,6 +155,10 @@ class DatasetPreparationTests(unittest.TestCase):
         self.assertEqual(
             [row["image_id"] for row in first],
             [row["image_id"] for row in second],
+        )
+        self.assertEqual(
+            {row["session_id"]: row["site_id"] for row in first},
+            {row["session_id"]: row["site_id"] for row in second},
         )
         _, reviews = dataset_prepare.read_review_workspace(self.config)
         self.assertEqual(
@@ -169,21 +190,26 @@ class DatasetPreparationTests(unittest.TestCase):
         destination, count = dataset_prepare.build_dataset(self.config)
         self.assertEqual(count, 6)
         manifest = dataset_prepare.read_csv(
-            destination / "manifest.csv", dataset_prepare.DATASET_FIELDS
+            destination / "metadata" / "manifest.csv", dataset_prepare.DATASET_FIELDS
         )
         self.assertTrue(all(row["label_path"].endswith(".txt") for row in manifest))
         self.assertTrue(all(row["label_status"] == "completed" for row in manifest))
+        self.assertTrue((destination / "images" / "site01_add001").is_dir())
+        self.assertTrue((destination / "labels" / "site02_add002").is_dir())
+        small = dataset_prepare.load_yaml(destination / "yaml" / "dataset_n001.yaml")
         self.assertEqual(
-            len(dataset_prepare.read_id_list(destination / "subsets" / "dataset_0003.txt")),
-            6,
+            small["train"],
+            ["images/site01_add001", "images/site02_add001"],
         )
+        large = dataset_prepare.load_yaml(destination / "yaml" / "dataset_n003.yaml")
         self.assertEqual(
-            len(dataset_prepare.read_id_list(
-                destination / "subsets" / "by_session" / "20260611_100000"
-                / "dataset_0003.txt"
-            )),
-            3,
+            large["train"],
+            [
+                "images/site01_add001", "images/site01_add002",
+                "images/site02_add001", "images/site02_add002",
+            ],
         )
+        self.assertTrue((destination / "metadata" / "site_map.csv").is_file())
         verified, errors = dataset_prepare.verify_dataset(destination)
         self.assertEqual(verified, 6)
         self.assertEqual(errors, [])

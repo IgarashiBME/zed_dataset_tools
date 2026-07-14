@@ -61,7 +61,7 @@ function renderSessionFilter(data) {
   Object.keys(data.keep_by_session).forEach(session => {
     const option = document.createElement("option");
     option.value = session;
-    option.textContent = `${session} (${data.keep_by_session[session]}/${data.target_per_session})`;
+    option.textContent = `${data.site_by_session[session]} — ${session} (${data.keep_by_session[session]}/${data.target_per_session})`;
     option.selected = session === state.session;
     sessionFilter.appendChild(option);
   });
@@ -108,7 +108,7 @@ function renderFocus(data) {
 
   document.querySelector("#focus-id").textContent = item.image_id;
   document.querySelector("#focus-position").textContent = `候補 #${item.candidate_order} · ${state.offset + 1}/${state.total}`;
-  document.querySelector("#focus-session").textContent = item.session_id;
+  document.querySelector("#focus-session").textContent = `${item.site_id} / ${item.session_id}`;
   focusReason.innerHTML = reasonOptions(item.reject_reason, data.reject_reasons);
   focusNote.value = item.note || "";
   focusMessage.textContent = item.decision || "未レビュー";
