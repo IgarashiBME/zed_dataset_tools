@@ -428,7 +428,9 @@ def _atomic_image(path: Path, array: Any, output: dict[str, Any]) -> None:
     temp = path.with_name(f".{path.stem}.tmp{path.suffix}")
     pixels = np.asarray(array)
     if pixels.ndim == 3 and pixels.shape[2] == 4:
-        image = Image.fromarray(pixels.astype(np.uint8), "RGBA").convert("RGB")
+        # ZED retrieve_image() returns four-channel images in BGRA order.
+        # Pillow expects RGB(A), so swap the blue and red channels and drop alpha.
+        image = Image.fromarray(pixels[:, :, [2, 1, 0]].astype(np.uint8), "RGB")
     elif pixels.ndim == 3 and pixels.shape[2] == 3:
         image = Image.fromarray(pixels.astype(np.uint8), "RGB")
     else:
