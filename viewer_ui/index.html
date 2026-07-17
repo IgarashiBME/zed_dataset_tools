@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZED Dataset Viewer</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="title-block">
+      <h1 id="dataset-name">ZED Dataset Viewer</h1>
+      <p id="summary">読み込み中…</p>
+    </div>
+    <div class="header-actions">
+      <div class="segmented" role="group" aria-label="表示モード">
+        <button id="grid-mode" class="active">グリッド</button>
+        <button id="focus-mode">フォーカス</button>
+      </div>
+      <div id="modality-switch" class="segmented" role="group" aria-label="表示画像">
+        <button data-modality="left" class="active">Left <kbd>L</kbd></button>
+        <button data-modality="right">Right <kbd>R</kbd></button>
+        <button data-modality="depth">Depth <kbd>D</kbd></button>
+      </div>
+    </div>
+  </header>
+
+  <section class="filters" aria-label="画像フィルター">
+    <div class="filter-block group-filter">
+      <span class="filter-label">追加グループ</span>
+      <div id="group-options" class="check-row"></div>
+      <div id="preset-options" class="preset-row"></div>
+    </div>
+
+    <details class="site-filter">
+      <summary id="site-summary">Site: すべて</summary>
+      <div class="site-actions">
+        <button id="all-sites">すべて選択</button>
+        <button id="no-sites">選択解除</button>
+      </div>
+      <div id="site-options" class="site-options"></div>
+    </details>
+
+    <label class="compact-field">検索
+      <input id="search" type="search" placeholder="image ID" autocomplete="off">
+    </label>
+    <label class="compact-field">並び順
+      <select id="sort">
+        <option value="sample_order">選択順</option>
+        <option value="site_group">Site・add順</option>
+        <option value="image_id">image ID順</option>
+      </select>
+    </label>
+    <label class="compact-field">表示枚数
+      <select id="page-size">
+        <option value="24">24</option>
+        <option value="48" selected>48</option>
+        <option value="96">96</option>
+      </select>
+    </label>
+  </section>
+
+  <section id="depth-controls" class="depth-controls hidden" aria-label="深度表示設定">
+    <label>カラーマップ
+      <select id="colormap">
+        <option value="turbo">Turbo</option>
+        <option value="viridis">Viridis</option>
+        <option value="magma">Magma</option>
+        <option value="grayscale">Grayscale</option>
+      </select>
+    </label>
+    <label>最小距離
+      <span><input id="depth-min" type="number" min="0" max="65.534" step="0.1" value="0.5"> m</span>
+    </label>
+    <label>最大距離
+      <span><input id="depth-max" type="number" min="0.001" max="65.535" step="0.5" value="10"> m</span>
+    </label>
+    <div class="range-presets" aria-label="距離範囲プリセット">
+      <button data-depth-range="0.5,5">0.5–5m</button>
+      <button data-depth-range="0.5,10" class="active">0.5–10m</button>
+      <button data-depth-range="0.5,20">0.5–20m</button>
+      <button data-depth-range="0.5,40">0.5–40m</button>
+    </div>
+    <label class="gamma-field">Gamma
+      <input id="gamma" type="range" min="0.2" max="3" step="0.1" value="1">
+      <output id="gamma-value">1.0</output>
+    </label>
+    <label class="toggle"><input id="invert" type="checkbox" checked> 近距離を暖色</label>
+    <label class="toggle" title="各画像の有効深度2～98パーセンタイルを使用します">
+      <input id="auto-range" type="checkbox"> 画像ごと自動
+    </label>
+    <div class="legend-wrap">
+      <div id="colorbar" class="colorbar"></div>
+      <div class="legend-labels"><span id="legend-near">0.5m</span><span id="legend-far">10m</span></div>
+    </div>
+    <span class="invalid-key"><i></i>無効深度</span>
+  </section>
+
+  <main>
+    <div id="error" class="error hidden" role="alert"></div>
+    <section id="grid" class="grid" aria-live="polite"></section>
+
+    <section id="focus" class="focus hidden" aria-live="polite">
+      <div class="focus-heading">
+        <div>
+          <strong id="focus-id"></strong>
+          <span id="focus-site"></span>
+        </div>
+        <span id="focus-position"></span>
+      </div>
+      <div class="focus-stage"><img id="focus-image" alt="データセット画像"></div>
+      <dl id="focus-metadata" class="focus-metadata"></dl>
+    </section>
+
+    <nav class="pagination" aria-label="ページ移動">
+      <button id="previous">前へ</button>
+      <span id="page"></span>
+      <button id="next">次へ</button>
+    </nav>
+    <p class="shortcuts">L Left / R Right / D Depth / ← → 前後 / G グリッド</p>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

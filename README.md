@@ -20,6 +20,8 @@ The current implementation samples selected frames from SVO2 recordings and expo
 - Reproducible per-session assignment to disjoint dataset increments
 - Site/increment directories with cumulative 10/40/100/200-image YAML files
 - Named dataset materialization with TXT or image label support
+- Read-only completed-dataset viewer with add/site filters and Left/Right/Depth switching
+- On-demand 16-bit depth colormaps with distance range and gamma controls
 
 ## Requirements
 
@@ -127,6 +129,16 @@ python3 scripts/dataset_prepare.py verify \
   ../ridge_data/dataset01_20260611_ehime
 ```
 
+Browse a completed dataset without modifying it:
+
+```bash
+python3 scripts/dataset_viewer.py \
+  ../ridge_data/dataset01_20260611_ehime
+```
+
+Open the displayed local URL in a browser. The viewer can combine increment groups,
+filter sites, switch Left/Right/Depth, and colorize 16-bit millimeter depth maps on demand.
+
 ## Tests
 
 The unit tests do not require a GPU or an SVO2 file:
@@ -142,6 +154,7 @@ Real SVO2 extraction requires access to the NVIDIA GPU through the ZED SDK.
 - [Extractor usage](docs/svo2_extractor_usage.md)
 - [Extractor design](docs/svo2_extractor_design.md)
 - [Dataset review and preparation](docs/dataset_preparation.md)
+- [Completed dataset viewer](docs/dataset_viewer.md)
 
 ## Repository safety
 
