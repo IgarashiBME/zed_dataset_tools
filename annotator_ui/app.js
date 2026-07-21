@@ -11,9 +11,12 @@ const app = {
   nextItem: null,
   image: null,
   canvasImages: {},
-  canvasModality: localStorage.getItem("zed-annotator-canvas-modality") === "depth"
-    ? "depth"
-    : "left",
+  canvasModality: ["left", "depth", "lateral"].includes(
+    localStorage.getItem("zed-annotator-canvas-modality")
+  ) ? localStorage.getItem("zed-annotator-canvas-modality") : "left",
+  lateralScale: ["100", "250", "500", "auto"].includes(
+    localStorage.getItem("zed-annotator-lateral-scale")
+  ) ? localStorage.getItem("zed-annotator-lateral-scale") : "250",
   backgroundToken: 0,
   loadToken: 0,
   saving: false,
@@ -32,6 +35,7 @@ const app = {
 
   async init() {
     this.ctx = this.canvas.getContext("2d");
+    document.querySelector("#lateral-scale").value = this.lateralScale;
     this.bindControls();
     this.bindCanvas();
     await this.loadState(true);
@@ -56,6 +60,15 @@ const app = {
     const status = document.querySelector("#status-filter").value;
     if (status) query.append("statuses", status);
     return query;
+  },
+
+  canvasSource(item, modality) {
+    if (!item) return null;
+    if (modality === "lateral") {
+      if (!item.assets.lateral) return null;
+      return `${item.assets.lateral}?${new URLSearchParams({ scale: this.lateralScale })}`;
+    }
+    return item.assets[modality] || null;
   },
 
   async loadState(firstLoad = false) {
@@ -199,10 +212,10 @@ const app = {
     document.querySelector("#save-message").textContent = "読み込み中…";
 
     try {
-      if (!this.item.assets[this.canvasModality]) this.canvasModality = "left";
+      if (!this.canvasSource(this.item, this.canvasModality)) this.canvasModality = "left";
       this.syncCanvasModalityButtons();
       const initialModality = this.canvasModality;
-      const imagePromise = this.loadImage(this.item.assets[initialModality]);
+      const imagePromise = this.loadImage(this.canvasSource(this.item, initialModality));
       const annotationPromise = fetch(`/api/annotation/${encodeURIComponent(this.item.image_id)}`)
         .then(async response => {
           const data = await response.json();
@@ -218,12 +231,13 @@ const app = {
       this.draw();
       this.renderReferenceButtons();
       document.querySelector("#save-message").textContent = "";
-      const preloadModality = this.nextItem?.assets?.[this.canvasModality]
+      const preloadModality = this.canvasSource(this.nextItem, this.canvasModality)
         ? this.canvasModality
         : "left";
-      if (this.nextItem?.assets?.[preloadModality]) {
+      const preloadSource = this.canvasSource(this.nextItem, preloadModality);
+      if (preloadSource) {
         const preload = new Image();
-        preload.src = this.nextItem.assets[preloadModality];
+        preload.src = preloadSource;
       }
     } catch (error) {
       if (token === this.loadToken) this.showError(String(error));
@@ -273,13 +287,22 @@ const app = {
 
   syncCanvasModalityButtons() {
     const hasDepth = Boolean(this.item?.assets?.depth);
-    document.querySelector("#canvas-left").classList.toggle("active", this.canvasModality === "left");
-    document.querySelector("#canvas-depth").classList.toggle("active", this.canvasModality === "depth");
-    document.querySelector("#canvas-depth").disabled = !hasDepth;
+    ["left", "depth", "lateral"].forEach(modality => {
+      const button = document.querySelector(`#canvas-${modality}`);
+      button.classList.toggle("active", this.canvasModality === modality);
+      if (modality !== "left") button.disabled = !hasDepth;
+    });
+    document.querySelector("#lateral-depth-legend").classList.toggle(
+      "hidden", this.canvasModality !== "lateral"
+    );
+    document.querySelectorAll("#lateral-depth-controls input, #lateral-depth-controls select")
+      .forEach(control => { control.disabled = !hasDepth; });
   },
 
   async setCanvasModality(modality) {
-    if (!this.item || !["left", "depth"].includes(modality) || !this.item.assets[modality]) return;
+    if (!this.item || !["left", "depth", "lateral"].includes(modality)) return;
+    const source = this.canvasSource(this.item, modality);
+    if (!source) return;
     this.canvasModality = modality;
     localStorage.setItem("zed-annotator-canvas-modality", modality);
     this.syncCanvasModalityButtons();
@@ -291,9 +314,10 @@ const app = {
     }
     const token = ++this.backgroundToken;
     const imageId = this.item.image_id;
-    document.querySelector("#save-message").textContent = `${modality === "depth" ? "Depth" : "Left"}を読み込み中…`;
+    const labels = { left: "Left", depth: "Depth", lateral: "Lateral Depth" };
+    document.querySelector("#save-message").textContent = `${labels[modality]}を読み込み中…`;
     try {
-      const image = await this.loadImage(this.item.assets[modality]);
+      const image = await this.loadImage(source);
       if (token !== this.backgroundToken || imageId !== this.item?.image_id) return;
       this.canvasImages[modality] = image;
       this.image = image;
@@ -410,6 +434,13 @@ const app = {
     document.querySelector("#mode-curve").addEventListener("click", () => this.setMode("curve"));
     document.querySelector("#canvas-left").addEventListener("click", () => this.setCanvasModality("left"));
     document.querySelector("#canvas-depth").addEventListener("click", () => this.setCanvasModality("depth"));
+    document.querySelector("#canvas-lateral").addEventListener("click", () => this.setCanvasModality("lateral"));
+    document.querySelector("#lateral-scale").addEventListener("change", event => {
+      this.lateralScale = event.target.value;
+      localStorage.setItem("zed-annotator-lateral-scale", this.lateralScale);
+      delete this.canvasImages.lateral;
+      if (this.canvasModality === "lateral") this.setCanvasModality("lateral");
+    });
     document.querySelector("#far-end-mode").addEventListener("change", event => this.setFarEndMode(event.target.value));
     document.querySelector("#confirm-side").addEventListener("click", () => this.confirmCurveSide());
     document.querySelector("#previous").addEventListener("click", () => this.previous());
@@ -426,6 +457,7 @@ const app = {
       else if (event.key === "ArrowRight") { event.preventDefault(); this.next(); }
       else if (!event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "l") { event.preventDefault(); this.setCanvasModality("left"); }
       else if (!event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "d") { event.preventDefault(); this.setCanvasModality("depth"); }
+      else if (!event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "t") { event.preventDefault(); this.setCanvasModality("lateral"); }
       else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); this.save(); }
       else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); this.undo(); }
     });

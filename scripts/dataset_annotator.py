@@ -347,6 +347,8 @@ class DatasetAnnotator:
                         f"/depth/{quote(image_id)}" if modality == "depth"
                         else f"/asset/{modality}/{quote(image_id)}"
                     )
+            if "depth" in assets:
+                assets["lateral"] = f"/lateral-depth/{quote(image_id)}"
             items.append({
                 "image_id": image_id,
                 "sample_order": dataset_viewer.integer_field(row, "sample_order"),
@@ -435,6 +437,17 @@ def _list_query(query: dict[str, list[str]], name: str) -> list[str]:
     for value in query.get(name, []):
         values.extend(item for item in value.split(",") if item)
     return values
+
+
+def _lateral_depth_request(
+    query: dict[str, list[str]],
+) -> dataset_viewer.LateralDepthOptions:
+    scale_value = query.get("scale", ["250"])[0]
+    options = dataset_viewer.LateralDepthOptions(
+        scale_mm=None if scale_value == "auto" else float(scale_value),
+    )
+    options.validate()
+    return options
 
 
 def make_handler(application: DatasetAnnotator, ui_root: Path):
@@ -530,6 +543,22 @@ def make_handler(application: DatasetAnnotator, ui_root: Path):
                             dataset_viewer.encode_png(dataset_viewer.depth_to_image(
                                 path, dataset_viewer.DepthOptions()
                             )),
+                            "image/png",
+                            cache="private, max-age=3600",
+                        )
+                    return
+                if parsed.path.startswith("/lateral-depth/"):
+                    image_id = unquote(parsed.path.removeprefix("/lateral-depth/"))
+                    path = application.viewer.asset(image_id, "depth")
+                    if path is None:
+                        self.send_error(HTTPStatus.NOT_FOUND)
+                    else:
+                        self.send_bytes(
+                            dataset_viewer.encode_png(
+                                dataset_viewer.lateral_depth_to_image(
+                                    path, _lateral_depth_request(query)
+                                )
+                            ),
                             "image/png",
                             cache="private, max-age=3600",
                         )

@@ -96,6 +96,7 @@ class DatasetAnnotatorTests(unittest.TestCase):
         )
         self.assertEqual(state["classes"], ["nakaaze"])
         self.assertFalse(state["readiness"][0]["ready"])
+        self.assertIn("lateral", state["items"][0]["assets"])
 
     def test_positive_label_and_edit_state_round_trip(self):
         item = self.application.state(groups=["add_0001"])["items"][0]
@@ -149,6 +150,16 @@ class DatasetAnnotatorTests(unittest.TestCase):
                 self.application.label_path(row)
         finally:
             row["left_path"] = original
+
+    def test_lateral_depth_request_options(self):
+        options = dataset_annotator._lateral_depth_request({"scale": ["500"]})
+        self.assertEqual(options.scale_mm, 500)
+        automatic = dataset_annotator._lateral_depth_request({"scale": ["auto"]})
+        self.assertIsNone(automatic.scale_mm)
+        defaults = dataset_annotator._lateral_depth_request({})
+        self.assertEqual(defaults.scale_mm, 250)
+        with self.assertRaises(dataset_annotator.dataset_viewer.ViewerError):
+            dataset_annotator._lateral_depth_request({"scale": ["10"]})
 
 
 if __name__ == "__main__":

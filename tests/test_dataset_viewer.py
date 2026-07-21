@@ -167,6 +167,53 @@ class DatasetViewerTests(unittest.TestCase):
         with self.assertRaises(dataset_viewer.ViewerError):
             dataset_viewer.DepthOptions(colormap="unknown").validate()
 
+    def test_lateral_depth_removes_forward_trend_and_preserves_side_differences(self):
+        height, width = 64, 128
+        y = np.arange(height, dtype=np.float32)[:, None]
+        depth = np.broadcast_to(2000 + 20 * y, (height, width)).copy()
+        depth[:, 45:60] -= 120
+        depth[:, 85:100] += 150
+        depth[0, 0] = 0
+        residual, valid = dataset_viewer.lateral_depth_residual(
+            depth, dataset_viewer.LateralDepthOptions(scale_mm=250)
+        )
+
+        self.assertEqual(residual.shape, depth.shape)
+        self.assertFalse(valid[0, 0])
+        self.assertGreater(float(np.median(residual[5:, 50])), 110)
+        self.assertLess(float(np.median(residual[5:, 90])), -140)
+        self.assertLess(abs(float(np.median(residual[5:, 70]))), 1)
+        self.assertLess(float(np.max(np.abs(residual[5:, 70]))), 1)
+
+    def test_lateral_depth_colorizes_all_valid_pixels_and_invalid_black(self):
+        depth_path = next((self.root / "depth").glob("*/*.png"))
+        height, width = 64, 128
+        y = np.arange(height, dtype=np.uint16)[:, None]
+        depth = np.broadcast_to(2000 + 10 * y, (height, width)).copy()
+        depth[:, 45:60] -= 120
+        depth[:, 85:100] += 150
+        depth[0, 0] = 0
+        Image.fromarray(depth).save(depth_path)
+
+        pixels = np.asarray(dataset_viewer.lateral_depth_to_image(
+            depth_path, dataset_viewer.LateralDepthOptions(scale_mm=250)
+        ))
+        automatic = dataset_viewer.lateral_depth_to_image(
+            depth_path, dataset_viewer.LateralDepthOptions(scale_mm=None)
+        )
+
+        self.assertEqual(pixels.shape, (height, width, 3))
+        self.assertEqual(tuple(pixels[0, 0]), (0, 0, 0))
+        self.assertTrue(np.all(np.any(pixels[depth > 0] != 0, axis=1)))
+        self.assertGreater(pixels[32, 50, 0], pixels[32, 50, 2])
+        self.assertGreater(pixels[32, 90, 2], pixels[32, 90, 0])
+        self.assertEqual(automatic.size, (width, height))
+
+    def test_invalid_lateral_depth_options_are_rejected(self):
+        with self.assertRaises(dataset_viewer.ViewerError):
+            dataset_viewer.LateralDepthOptions(scale_mm=10).validate()
+        with self.assertRaises(dataset_viewer.ViewerError):
+            dataset_viewer.LateralDepthOptions(smoothing_rows=20).validate()
 
 if __name__ == "__main__":
     unittest.main()

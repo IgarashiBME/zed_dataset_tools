@@ -149,6 +149,11 @@ The annotator keeps images and the build manifest read-only. It writes labels un
 `labels/siteXX_addNNN/` and editable control-point state under
 `metadata/annotation_state/`.
 
+The annotation canvas can show Raw Depth or Lateral Depth. Lateral Depth subtracts
+a smoothed per-row median so that the forward distance gradient is reduced while
+left-to-right differences remain visible in a continuous Turbo color map. It is a
+human visual aid and is not stored in labels or annotation sidecars.
+
 Open the displayed local URL in a browser. The viewer can combine increment groups,
 filter sites, switch Left/Right/Depth, and colorize 16-bit millimeter depth maps on demand.
 

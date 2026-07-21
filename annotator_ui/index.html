@@ -71,6 +71,7 @@
             <div id="canvas-modality-switch" class="segmented" aria-label="Canvas背景">
               <button id="canvas-left" class="active" type="button">Left <kbd>L</kbd></button>
               <button id="canvas-depth" type="button">Depth <kbd>D</kbd></button>
+              <button id="canvas-lateral" type="button">Lateral <kbd>T</kbd></button>
             </div>
             <span id="position"></span>
           </div>
@@ -82,6 +83,11 @@
           <span class="orange">● 右境界</span>
           <span class="violet">● 終端</span>
           <span class="green">━ 中心線</span>
+        </p>
+        <p id="lateral-depth-legend" class="depth-difference-legend hidden">
+          <span class="farther-chip"></span> 同じ行の基準より奥
+          <span class="lateral-neutral-chip"></span> 行の基準距離
+          <span class="closer-chip"></span> 同じ行の基準より手前
         </p>
       </div>
 
@@ -99,6 +105,19 @@
             </select>
           </label>
           <button id="confirm-side" class="wide hidden" type="button"></button>
+        </section>
+
+        <section id="lateral-depth-controls">
+          <h2>Lateral Depth</h2>
+          <label class="depth-setting">Lateral表示幅
+            <select id="lateral-scale">
+              <option value="100">±100 mm</option>
+              <option value="250" selected>±250 mm</option>
+              <option value="500">±500 mm</option>
+              <option value="auto">Auto</option>
+            </select>
+          </label>
+          <p class="depth-note">各行のDepth中央値を基準に、同じ距離帯の左右差を強調します。</p>
         </section>
 
         <section>

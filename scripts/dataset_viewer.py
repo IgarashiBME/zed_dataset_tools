@@ -9,6 +9,7 @@ import io
 import json
 import mimetypes
 import re
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from http import HTTPStatus
@@ -87,6 +88,21 @@ class DepthOptions:
             raise ViewerError("深度範囲は0～65.535m内で、最小値<最大値にしてください")
         if not 0.2 <= self.gamma <= 3.0:
             raise ViewerError("gammaは0.2～3.0にしてください")
+        if self.colormap not in COLORMAP_ANCHORS:
+            raise ViewerError(f"未対応のカラーマップです: {self.colormap}")
+
+
+@dataclass(frozen=True)
+class LateralDepthOptions:
+    scale_mm: float | None = 250.0
+    smoothing_rows: int = 31
+    colormap: str = "turbo"
+
+    def validate(self) -> None:
+        if self.scale_mm is not None and not 20.0 <= self.scale_mm <= 2000.0:
+            raise ViewerError("Lateral Depth表示幅は20～2000mmにしてください")
+        if not 3 <= self.smoothing_rows <= 201 or self.smoothing_rows % 2 == 0:
+            raise ViewerError("Lateral Depth縦方向平滑化幅は3～201の奇数にしてください")
         if self.colormap not in COLORMAP_ANCHORS:
             raise ViewerError(f"未対応のカラーマップです: {self.colormap}")
 
@@ -174,6 +190,67 @@ def depth_to_image(path: Path, options: DepthOptions, thumbnail: bool = False):
     if thumbnail:
         image.thumbnail((480, 270), Image.Resampling.LANCZOS)
     return image
+
+
+def _odd_window(value: int, available: int) -> int:
+    maximum = available if available % 2 else available - 1
+    result = max(3, min(value, maximum))
+    return result if result % 2 else result - 1
+
+
+def lateral_depth_residual(depth_mm: Any, options: LateralDepthOptions):
+    """Return each pixel's signed distance from its smoothed row median."""
+    import numpy as np
+
+    options.validate()
+    depth = np.asarray(depth_mm, dtype=np.float32)
+    if depth.ndim != 2 or min(depth.shape) < 2:
+        raise ViewerError("Lateral Depthへ変換できない深度画像です")
+    valid = np.isfinite(depth) & (depth > 0)
+    masked = np.where(valid, depth, np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        row_medians = np.nanmedian(masked, axis=1)
+
+    known_rows = np.flatnonzero(np.isfinite(row_medians))
+    if known_rows.size:
+        rows = np.arange(depth.shape[0])
+        row_medians = np.interp(rows, known_rows, row_medians[known_rows])
+        window = _odd_window(options.smoothing_rows, depth.shape[0])
+        radius = window // 2
+        padded = np.pad(row_medians, (radius, radius), mode="edge")
+        samples = np.lib.stride_tricks.sliding_window_view(padded, window)
+        baseline = np.median(samples, axis=1).astype(np.float32)
+    else:
+        baseline = np.zeros(depth.shape[0], dtype=np.float32)
+
+    # Positive values are closer than the representative depth on that row.
+    residual = baseline[:, None] - depth
+    residual[~valid] = 0.0
+    return residual, valid
+
+
+def lateral_depth_to_image(path: Path, options: LateralDepthOptions):
+    """Colorize lateral depth differences after removing the row-wise trend."""
+    import numpy as np
+    from PIL import Image
+
+    depth = load_depth_millimeters(path)
+    residual, valid = lateral_depth_residual(depth, options)
+    values = np.abs(residual[valid])
+    if options.scale_mm is None:
+        scale_mm = float(np.percentile(values, 98.0)) if values.size else 250.0
+        scale_mm = max(50.0, min(2000.0, scale_mm))
+    else:
+        scale_mm = options.scale_mm
+
+    # Turbo follows the Raw Depth view: warmer means relatively closer and
+    # cooler means relatively farther. The row median maps to its midpoint.
+    normalized = np.clip(0.5 + residual / (2.0 * scale_mm), 0.0, 1.0)
+    indices = np.rint(normalized * 255.0).astype(np.uint8)
+    rgb = colormap_lut(options.colormap)[indices]
+    rgb[~valid] = 0
+    return Image.fromarray(rgb, mode="RGB")
 
 
 def encode_png(image: Any) -> bytes:
