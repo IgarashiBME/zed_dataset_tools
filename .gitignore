@@ -10,6 +10,9 @@
 !/.github/
 !/configs/
 !/docs/
+!/review_ui/
+!/viewer_ui/
+!/annotator_ui/
 !/scripts/
 !/tests/
 

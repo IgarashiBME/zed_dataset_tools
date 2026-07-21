@@ -129,5 +129,22 @@ class PathAndManifestTests(unittest.TestCase):
         self.assertEqual(svo_extract.format_duration(3661), "1:01:01")
 
 
+class ImageSavingTests(unittest.TestCase):
+    def test_bgra_image_is_saved_as_rgb(self):
+        import numpy as np
+        from PIL import Image
+
+        bgra = np.array([[
+            [255, 0, 0, 255],  # Blue in BGRA.
+            [0, 0, 255, 255],  # Red in BGRA.
+        ]], dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "colors.png"
+            svo_extract._atomic_image(path, bgra, {"compression": 3})
+            with Image.open(path) as image:
+                self.assertEqual(image.mode, "RGB")
+                self.assertEqual(list(image.getdata()), [(0, 0, 255), (255, 0, 0)])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,14 @@ The current implementation samples selected frames from SVO2 recordings and expo
 - Configurable progress reporting
 - Output validation for missing, corrupt, or mismatched files
 - Separate source recordings from sibling `<session>_exports` directories
+- Focus and grid browser review with keep, reject reason, hold, and auto-advance
+- Reproducible per-session assignment to disjoint dataset increments
+- Site/increment directories with cumulative 10/40/100/200-image YAML files
+- Named dataset materialization with TXT or image label support
+- Read-only completed-dataset viewer with add/site filters and Left/Right/Depth switching
+- On-demand 16-bit depth colormaps with distance range and gamma controls
+- Local YOLO-seg annotator with add/site/status filters, line or curve ridge boundaries,
+  and an optional two-point angled far-end boundary
 
 ## Requirements
 
@@ -100,6 +108,50 @@ python3 scripts/svo_extract.py verify \
   20260611-12Ehime/20260611_104824_exports/500images_v1
 ```
 
+Prepare and review a dataset after extraction:
+
+```bash
+python3 scripts/dataset_prepare.py plan \
+  --config configs/dataset.example.yaml
+
+python3 scripts/dataset_prepare.py review \
+  --config configs/dataset.example.yaml
+```
+
+After every session has at least the configured number of images marked `keep`:
+
+```bash
+python3 scripts/dataset_prepare.py select \
+  --config configs/dataset.example.yaml
+
+python3 scripts/dataset_prepare.py build \
+  --config configs/dataset.example.yaml
+
+python3 scripts/dataset_prepare.py verify \
+  ../ridge_data/dataset01_20260611_ehime
+```
+
+Browse a completed dataset without modifying it:
+
+```bash
+python3 scripts/dataset_viewer.py \
+  ../ridge_data/dataset01_20260611_ehime
+```
+
+Create Ultralytics YOLO-seg labels for a completed dataset:
+
+```bash
+python3 scripts/dataset_annotator.py \
+  ../dataset_field_bund/data0001_20260611-12_ehime
+```
+
+The annotator keeps images and the build manifest read-only. It writes labels under
+`labels/siteXX_addNNN/` and editable control-point state under
+`metadata/annotation_state/`.
+
+Open the displayed local URL in a browser. The viewer can combine increment groups,
+filter sites, switch Left/Right/Depth, and colorize 16-bit millimeter depth maps on demand.
+
 ## Tests
 
 The unit tests do not require a GPU or an SVO2 file:
@@ -114,6 +166,9 @@ Real SVO2 extraction requires access to the NVIDIA GPU through the ZED SDK.
 
 - [Extractor usage](docs/svo2_extractor_usage.md)
 - [Extractor design](docs/svo2_extractor_design.md)
+- [Dataset review and preparation](docs/dataset_preparation.md)
+- [Completed dataset viewer](docs/dataset_viewer.md)
+- [YOLO-seg annotation tool](docs/dataset_annotation.md)
 
 ## Repository safety
 

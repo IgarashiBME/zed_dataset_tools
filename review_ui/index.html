@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZED Dataset Review</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>ZED Dataset Review</h1>
+      <p id="summary">読み込み中…</p>
+    </div>
+    <div class="toolbar">
+      <div class="mode-switch" role="group" aria-label="表示モード">
+        <button id="focus-mode" class="active">フォーカス</button>
+        <button id="grid-mode">グリッド</button>
+      </div>
+      <label>Reviewer <input id="reviewer" autocomplete="name"></label>
+      <label>表示
+        <select id="filter">
+          <option value="unreviewed">未レビュー</option>
+          <option value="">すべて</option>
+          <option value="keep">Keep</option>
+          <option value="reject">Reject</option>
+          <option value="hold">Hold</option>
+        </select>
+      </label>
+      <label>Session
+        <select id="session-filter">
+          <option value="">すべて</option>
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <main>
+    <section id="focus" class="focus-review">
+      <div class="focus-workspace">
+        <div class="focus-main">
+          <div class="focus-heading">
+            <strong id="focus-id"></strong>
+            <span id="focus-position"></span>
+          </div>
+          <div class="focus-stage">
+            <img id="focus-image" alt="レビュー画像">
+          </div>
+        </div>
+        <aside class="focus-sidebar">
+          <div class="sidebar-session">
+            <span class="sidebar-label">Session</span>
+            <strong id="focus-session"></strong>
+          </div>
+          <div class="sidebar-section">
+            <span class="sidebar-label">表示</span>
+            <div id="modality-switch" class="modality-switch"></div>
+          </div>
+          <label class="sidebar-section">
+            <span class="sidebar-label">Reject理由</span>
+            <select id="focus-reason" aria-label="Reject理由"></select>
+          </label>
+          <label class="sidebar-section">
+            <span class="sidebar-label">メモ（任意）</span>
+            <textarea id="focus-note" placeholder="補足（任意）"></textarea>
+          </label>
+          <div class="focus-controls">
+            <div class="focus-decisions">
+              <button id="focus-keep" class="keep-button">Keep <kbd>K</kbd></button>
+              <button id="focus-reject" class="reject-button">Reject <kbd>R</kbd></button>
+              <button id="focus-hold" class="hold-button">Hold <kbd>H</kbd></button>
+            </div>
+            <div id="focus-message" class="message"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+    <div id="grid" class="grid"></div>
+    <nav>
+      <button id="previous">前へ</button>
+      <span id="page"></span>
+      <button id="next">次へ</button>
+    </nav>
+    <p class="shortcuts">フォーカス操作: K Keep / R Reject / H Hold / L Left / V Right / D Depth / ← → 移動</p>
+  </main>
+
+  <dialog id="viewer">
+    <button id="close-viewer" class="close" aria-label="閉じる">×</button>
+    <h2 id="viewer-title"></h2>
+    <div id="viewer-images" class="viewer-images"></div>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

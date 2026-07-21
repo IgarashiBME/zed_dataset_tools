@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZED Dataset Annotator</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1 id="dataset-name">ZED Dataset Annotator</h1>
+      <p id="summary">読み込み中…</p>
+    </div>
+    <div id="readiness" class="readiness"></div>
+  </header>
+
+  <section class="filters" aria-label="作業対象フィルター">
+    <label>範囲
+      <select id="scope-mode">
+        <option value="exact">単独増分</option>
+        <option value="cumulative">累積セット</option>
+      </select>
+    </label>
+    <label>対象
+      <select id="scope-value"></select>
+    </label>
+    <details id="site-filter">
+      <summary id="site-summary">Site: すべて</summary>
+      <div class="site-menu">
+        <div class="site-actions">
+          <button id="all-sites" type="button">全siteに戻す</button>
+        </div>
+        <div id="site-options"></div>
+      </div>
+    </details>
+    <label>状態
+      <select id="status-filter">
+        <option value="unannotated">未処理</option>
+        <option value="">すべて</option>
+        <option value="positive">ラベルあり</option>
+        <option value="empty">対象なし</option>
+      </select>
+    </label>
+    <label>並び順
+      <select id="sort">
+        <option value="site_frame">Site・フレーム順</option>
+        <option value="sample_order">選択順</option>
+        <option value="image_id">Image ID順</option>
+      </select>
+    </label>
+    <label class="search-field">検索
+      <input id="search" type="search" placeholder="image ID" autocomplete="off">
+    </label>
+  </section>
+
+  <main>
+    <div id="error" class="error hidden" role="alert"></div>
+    <section id="empty-state" class="empty-state hidden">
+      表示条件に一致する画像がありません。
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <div class="editor-panel">
+        <div class="image-heading">
+          <div>
+            <strong id="image-id"></strong>
+            <span id="image-meta"></span>
+          </div>
+          <div class="image-heading-actions">
+            <div id="canvas-modality-switch" class="segmented" aria-label="Canvas背景">
+              <button id="canvas-left" class="active" type="button">Left <kbd>L</kbd></button>
+              <button id="canvas-depth" type="button">Depth <kbd>D</kbd></button>
+            </div>
+            <span id="position"></span>
+          </div>
+        </div>
+        <div id="canvas-wrap"><canvas id="annotation-canvas"></canvas></div>
+        <p id="step-message" class="step-message"></p>
+        <p class="legend">
+          <span class="cyan">● 左境界</span>
+          <span class="orange">● 右境界</span>
+          <span class="violet">● 終端</span>
+          <span class="green">━ 中心線</span>
+        </p>
+      </div>
+
+      <aside class="control-panel">
+        <section>
+          <h2>境界入力</h2>
+          <div class="segmented">
+            <button id="mode-line" class="active" type="button">Line</button>
+            <button id="mode-curve" type="button">Curve</button>
+          </div>
+          <label class="end-select">遠端
+            <select id="far-end-mode">
+              <option value="image_boundary">画像外まで続く</option>
+              <option value="line">画像内で終了（2点）</option>
+            </select>
+          </label>
+          <button id="confirm-side" class="wide hidden" type="button"></button>
+        </section>
+
+        <section>
+          <h2>参照画像</h2>
+          <div id="reference-switch" class="segmented"></div>
+          <div class="reference-stage">
+            <img id="reference-image" alt="参照画像">
+            <span id="reference-empty">参照画像なし</span>
+          </div>
+        </section>
+
+        <section class="status-card">
+          <h2>現在の状態</h2>
+          <strong id="annotation-status">未処理</strong>
+          <p id="save-message"></p>
+        </section>
+      </aside>
+    </section>
+
+    <nav class="actions" aria-label="アノテーション操作">
+      <button id="previous" type="button">← 前へ</button>
+      <button id="undo" type="button">Undo</button>
+      <button id="clear" type="button">Clear</button>
+      <button id="delete" class="danger" type="button">ラベル削除</button>
+      <button id="empty" class="warning" type="button">対象なし・次へ</button>
+      <button id="save" class="primary" type="button">保存して次へ</button>
+      <button id="next" type="button">次へ →</button>
+    </nav>
+    <p class="shortcuts">← → 前後 / Ctrl+S 保存 / Ctrl+Z Undo / 点はドラッグで修正</p>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
