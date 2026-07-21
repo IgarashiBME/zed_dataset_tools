@@ -22,6 +22,8 @@ The current implementation samples selected frames from SVO2 recordings and expo
 - Named dataset materialization with TXT or image label support
 - Read-only completed-dataset viewer with add/site filters and Left/Right/Depth switching
 - On-demand 16-bit depth colormaps with distance range and gamma controls
+- Local YOLO-seg annotator with add/site/status filters, line or curve ridge boundaries,
+  and an optional two-point angled far-end boundary
 
 ## Requirements
 
@@ -136,6 +138,17 @@ python3 scripts/dataset_viewer.py \
   ../ridge_data/dataset01_20260611_ehime
 ```
 
+Create Ultralytics YOLO-seg labels for a completed dataset:
+
+```bash
+python3 scripts/dataset_annotator.py \
+  ../dataset_field_bund/data0001_20260611-12_ehime
+```
+
+The annotator keeps images and the build manifest read-only. It writes labels under
+`labels/siteXX_addNNN/` and editable control-point state under
+`metadata/annotation_state/`.
+
 Open the displayed local URL in a browser. The viewer can combine increment groups,
 filter sites, switch Left/Right/Depth, and colorize 16-bit millimeter depth maps on demand.
 
@@ -155,6 +168,7 @@ Real SVO2 extraction requires access to the NVIDIA GPU through the ZED SDK.
 - [Extractor design](docs/svo2_extractor_design.md)
 - [Dataset review and preparation](docs/dataset_preparation.md)
 - [Completed dataset viewer](docs/dataset_viewer.md)
+- [YOLO-seg annotation tool](docs/dataset_annotation.md)
 
 ## Repository safety
 
